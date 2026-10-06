@@ -6,12 +6,16 @@ from django.forms.models import inlineformset_factory
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.shortcuts import get_object_or_404, redirect
 from django.http import HttpResponseForbidden
+from django.views import View
 
 
 class ProductListView(ListView):
     model = Product
     template_name = 'catalog/product_list.html'
     context_object_name = 'products'
+
+    def get_queryset(self):
+        return Product.objects.filter(publish=True)
 
 
 class ProductDetailView(LoginRequiredMixin, DetailView):
@@ -27,6 +31,13 @@ class ProductCreateView(LoginRequiredMixin, CreateView):
     context_object_name = 'product'
     success_url = reverse_lazy('catalog:product_list')
 
+    def form_valid(self, form):
+        product = form.save()
+        user = self.request.user
+        product.owner = user
+        product.save()
+        return super().form_valid(form)
+
 
 class ProductUpdateView(LoginRequiredMixin, UpdateView):
     model = Product
@@ -35,6 +46,15 @@ class ProductUpdateView(LoginRequiredMixin, UpdateView):
     context_object_name = 'product'
     success_url = reverse_lazy('catalog:product_list')
 
+    def dispatch(self, request, pk):
+        product = get_object_or_404(Product, pk=pk)
+        user = request.user
+
+        if product.owner != user and not user.groups.filter(name='Модератор продуктов').exists():
+            return HttpResponseForbidden('Отсутствуют права на редактирование продукта.')
+        return super().dispatch(request, pk)
+
+
 
 class ProductDeleteView(LoginRequiredMixin, DeleteView):
     model = Product
@@ -42,12 +62,15 @@ class ProductDeleteView(LoginRequiredMixin, DeleteView):
     template_name = 'catalog/product_delete.html'
     success_url = reverse_lazy('catalog:product_list')
 
+
+class UnpublishProduct(LoginRequiredMixin, View):
     def post(self, request, pk):
         product = get_object_or_404(Product, pk=pk)
 
         if not request.user.has_perm('catalog.can_unpublish_product'):
-            return HttpResponseForbidden('У Вас нет доступа для удаления продукта.')
-        product.delete()
+            return HttpResponseForbidden('У Вас нет доступа для снятия продукта с публикации.')
+        product.publish = False
+        product.save()
         return redirect('catalog:product_list')
 
 
